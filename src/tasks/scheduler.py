@@ -44,19 +44,29 @@ class WindowsScheduler:
         try:
             result = subprocess.run(
                 command,
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='ignore'
+                capture_output=True
             )
 
-            output = result.stdout + result.stderr
+            # 尝试多种编码解码（Windows schtasks通常使用GBK）
+            output = None
+            for encoding in ['gbk', 'utf-8', 'cp936']:
+                try:
+                    output = result.stdout.decode(encoding) + result.stderr.decode(encoding)
+                    break
+                except (UnicodeDecodeError, LookupError):
+                    continue
+
+            # 如果所有编码都失败，使用替换策略
+            if output is None:
+                output = result.stdout.decode('utf-8', errors='replace') + \
+                         result.stderr.decode('utf-8', errors='replace')
 
             if result.returncode == 0:
                 logger.debug(f"命令执行成功: {' '.join(command)}")
                 return True, output
             else:
                 logger.error(f"命令执行失败: {' '.join(command)}")
+                logger.error(f"返回码: {result.returncode}")
                 logger.error(f"输出: {output}")
                 return False, output
 
@@ -128,8 +138,8 @@ class WindowsScheduler:
         """
         创建休眠唤醒触发任务
 
-        注意：Windows 任务计划对休眠唤醒的支持有限
-        此方法使用事件触发器监听 Power-Troubleshooter 事件
+        使用 Kernel-Power Event ID 107（系统从低功耗状态恢复）
+        这是最可靠的睡眠唤醒检测事件
 
         Args:
             delay_seconds: 延迟秒数
@@ -152,12 +162,13 @@ class WindowsScheduler:
         action = f'"{pythonw_exe}" "{self.main_script}" trigger --type wake --delay {delay_seconds}'
 
         # 创建 XML 配置文件（用于事件触发）
+        # 使用 Kernel-Power Event ID 107: 系统已从睡眠状态恢复
         xml_content = f'''<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <Triggers>
     <EventTrigger>
       <Enabled>true</Enabled>
-      <Subscription>&lt;QueryList&gt;&lt;Query Id="0" Path="System"&gt;&lt;Select Path="System"&gt;*[System[Provider[@Name='Microsoft-Windows-Power-Troubleshooter'] and EventID=1]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>
+      <Subscription>&lt;QueryList&gt;&lt;Query Id="0" Path="System"&gt;&lt;Select Path="System"&gt;*[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and (EventID=107)]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>
     </EventTrigger>
   </Triggers>
   <Principals>
@@ -262,6 +273,24 @@ class WindowsScheduler:
         else:
             logger.error(f"任务删除失败: {output}")
             return False
+
+    def uninstall_boot_task(self) -> bool:
+        """
+        卸载开机任务
+
+        Returns:
+            是否成功
+        """
+        return self.delete_task(self.TASK_NAME_BOOT)
+
+    def uninstall_wake_task(self) -> bool:
+        """
+        卸载唤醒任务
+
+        Returns:
+            是否成功
+        """
+        return self.delete_task(self.TASK_NAME_WAKE)
 
     def install_all(self) -> Tuple[bool, bool]:
         """

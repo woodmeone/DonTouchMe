@@ -13,7 +13,11 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from ..core.monitor import Monitor
+from ..core.power_monitor import PowerEventMonitor
 from ..utils.logger import Logger
+from ..utils.boot_detector import is_boot_start
+from ..utils.autostart import AutoStartManager
+from ..tasks.scheduler import WindowsScheduler
 from .config_window import ConfigWindow
 from .history_window import HistoryWindow
 
@@ -55,8 +59,19 @@ class DonTouchMeApp(QApplication):
         self.config_window = None
         self.history_window = None
 
+        # 电源监听器
+        self.power_monitor = None
+
         # 创建系统托盘
         self._init_tray()
+
+        # 检查是否为开机启动
+        if is_boot_start(threshold_seconds=120):
+            logger.info("检测到开机启动，将触发开机监控")
+            self._on_boot_trigger()
+
+        # 启动电源事件监听
+        self._start_power_monitoring()
 
         logger.info("DonTouchMe GUI 应用已启动")
 
@@ -88,8 +103,22 @@ class DonTouchMeApp(QApplication):
 
         self.tray_menu.addSeparator()
 
-        # 菜单项：启用/禁用监控
-        self.action_toggle_monitor = QAction("禁用监控", self)
+        # 菜单项：任务计划管理
+        self.action_task_manager = QAction("任务计划管理", self)
+        self.action_task_manager.triggered.connect(self.show_task_manager)
+        self.tray_menu.addAction(self.action_task_manager)
+
+        self.tray_menu.addSeparator()
+
+        # 菜单项：开机自启动
+        self.action_autostart = QAction("开机自启动", self)
+        self.action_autostart.setCheckable(True)
+        self.action_autostart.setChecked(AutoStartManager.is_enabled())
+        self.action_autostart.triggered.connect(self.toggle_autostart)
+        self.tray_menu.addAction(self.action_autostart)
+
+        # 菜单项：启用/禁用后台监控
+        self.action_toggle_monitor = QAction("禁用后台监控", self)
         self.action_toggle_monitor.triggered.connect(self.toggle_monitoring)
         self.tray_menu.addAction(self.action_toggle_monitor)
 
@@ -142,20 +171,91 @@ class DonTouchMeApp(QApplication):
         self.history_window.activateWindow()
         logger.info("打开历史记录窗口")
 
+    def _start_power_monitoring(self):
+        """启动电源事件监听"""
+        if not self.monitoring_enabled:
+            logger.info("监控已禁用，跳过电源监听启动")
+            return
+
+        try:
+            self.power_monitor = PowerEventMonitor(
+                on_boot_callback=self._on_boot_trigger,
+                on_wake_callback=self._on_wake_trigger
+            )
+            self.power_monitor.start()
+            logger.info("电源事件监听已启动")
+        except Exception as e:
+            logger.error(f"启动电源监听失败: {e}")
+            self.show_notification("警告", f"启动电源监听失败: {e}\n将无法自动检测唤醒事件")
+
+    def _stop_power_monitoring(self):
+        """停止电源事件监听"""
+        if self.power_monitor:
+            self.power_monitor.stop()
+            self.power_monitor = None
+            logger.info("电源事件监听已停止")
+
+    def _on_boot_trigger(self):
+        """开机触发回调"""
+        if not self.monitoring_enabled:
+            logger.info("监控已禁用，跳过开机触发")
+            return
+
+        logger.info("开机事件触发")
+        self._execute_monitor('boot')
+
+    def _on_wake_trigger(self):
+        """唤醒触发回调"""
+        if not self.monitoring_enabled:
+            logger.info("监控已禁用，跳过唤醒触发")
+            return
+
+        logger.info("唤醒事件触发")
+        self._execute_monitor('wake')
+
+    def _execute_monitor(self, trigger_type):
+        """执行监控任务（在线程中）"""
+        if self.monitor_thread and self.monitor_thread.isRunning():
+            logger.warning("监控任务正在执行，跳过本次触发")
+            return
+
+        self.monitor_thread = MonitorThread(trigger_type=trigger_type)
+        self.monitor_thread.finished.connect(self.on_monitor_finished)
+        self.monitor_thread.start()
+
+    def toggle_autostart(self):
+        """切换开机自启动"""
+        if self.action_autostart.isChecked():
+            if AutoStartManager.enable():
+                self.show_notification("开机自启动", "已启用开机自启动")
+                logger.info("开机自启动已启用")
+            else:
+                self.action_autostart.setChecked(False)
+                self.show_notification("失败", "启用开机自启动失败")
+        else:
+            if AutoStartManager.disable():
+                self.show_notification("开机自启动", "已禁用开机自启动")
+                logger.info("开机自启动已禁用")
+            else:
+                self.action_autostart.setChecked(True)
+                self.show_notification("失败", "禁用开机自启动失败")
+
     def toggle_monitoring(self):
-        """切换监控启用/禁用状态"""
+        """切换后台监控启用/禁用状态"""
         self.monitoring_enabled = not self.monitoring_enabled
 
         if self.monitoring_enabled:
-            self.action_toggle_monitor.setText("禁用监控")
-            self.tray_icon.setToolTip("DonTouchMe - 监控运行中")
-            logger.info("监控已启用")
-            self.show_notification("监控已启用", "DonTouchMe 将监控电脑开机和唤醒事件")
+            self.action_toggle_monitor.setText("禁用后台监控")
+            self.tray_icon.setToolTip("DonTouchMe - 后台监控运行中")
+            self._start_power_monitoring()
+            logger.info("后台监控已启用")
+            self.show_notification("后台监控已启用", "将自动监控开机和唤醒事件")
         else:
-            self.action_toggle_monitor.setText("启用监控")
-            self.tray_icon.setToolTip("DonTouchMe - 监控已禁用")
-            logger.info("监控已禁用")
-            self.show_notification("监控已禁用", "DonTouchMe 不再自动监控，手动触发仍然可用")
+            self.action_toggle_monitor.setText("启用后台监控")
+            self.tray_icon.setToolTip("DonTouchMe - 后台监控已禁用")
+            self._stop_power_monitoring()
+            logger.info("后台监控已禁用")
+            self.show_notification("后台监控已禁用", "手动触发仍然可用")
 
     def manual_trigger(self):
         """手动触发监控"""
@@ -188,6 +288,12 @@ class DonTouchMeApp(QApplication):
         self.show_notification("配置已保存", "配置已成功保存并生效")
         logger.info("配置已保存")
 
+    def show_task_manager(self):
+        """显示任务计划管理对话框"""
+        from .task_manager_dialog import TaskManagerDialog
+        dialog = TaskManagerDialog()
+        dialog.exec_()
+
     def show_notification(self, title, message):
         """显示系统托盘通知"""
         self.tray_icon.showMessage(
@@ -202,12 +308,16 @@ class DonTouchMeApp(QApplication):
         reply = QMessageBox.question(
             None,
             '退出确认',
-            '确定要退出 DonTouchMe 吗？\n退出后将停止所有监控功能。',
+            '确定要退出 DonTouchMe 吗？\n\n'
+            '退出后将停止后台监控功能。\n'
+            '建议：您可以最小化到托盘而不是退出。',
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
 
         if reply == QMessageBox.Yes:
+            # 停止电源监听
+            self._stop_power_monitoring()
             logger.info("用户退出应用")
             self.tray_icon.hide()
             self.quit()

@@ -47,6 +47,14 @@ class Config:
             "on_wake": True,
             "delay_seconds": 10
         },
+        "background_monitor": {
+            "enabled": True,
+            "boot_detection_threshold": 120,
+            "debounce_interval": 30
+        },
+        "autostart": {
+            "enabled": False
+        },
         "advanced": {
             "debug_mode": False,
             "log_level": "INFO"

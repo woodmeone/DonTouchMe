@@ -1,11 +1,19 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python src/main.py:*)",
-      "Bash(python camera.py:*)",
-      "Bash(python -m src.core.database:*)",
-      "Bash(python check_history.py:*)",
-      "Bash(pip install:*)"
+      "Bash(cmd /c \"powershell Get-ScheduledTask | findstr DonTouchMe\")",
+      "Bash(python:*)",
+      "Bash(dir:*)",
+      "WebSearch",
+      "Bash(powershell -Command \"Get-WinEvent -LogName System -MaxEvents 5 | Where-Object {$_ProviderName -eq ''Microsoft-Windows-Kernel-Power''} | Select-Object Id, TimeCreated, Message | Format-List\")",
+      "Bash(powershell:*)",
+      "Bash(cmd /c \"wevtutil qe System /c:20 /rd:true /f:text /q:*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and (EventID=1)]]\")",
+      "Bash(schtasks /Query /TN DonTouchMe_Boot /V /FO LIST)",
+      "Bash(schtasks /Query /TN DonTouchMe_Wake /V /FO LIST)",
+      "Bash(timeout:*)",
+      "Bash(pip install:*)",
+      "Bash(git add:*)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []
