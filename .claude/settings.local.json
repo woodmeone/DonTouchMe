@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python src/main.py:*)",
+      "Bash(python camera.py:*)",
+      "Bash(python -m src.core.database:*)",
+      "Bash(python check_history.py:*)",
+      "Bash(pip install:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
