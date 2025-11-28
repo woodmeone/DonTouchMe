@@ -19,3 +19,6 @@ psutil>=5.9.0
 
 # 任务调度备用
 schedule>=1.2.0
+
+# 打包工具（开发环境）
+pyinstaller>=6.0.0
