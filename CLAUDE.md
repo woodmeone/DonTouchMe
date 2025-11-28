@@ -55,6 +55,18 @@ powershell -Command "Get-ScheduledTask | Where-Object {$_.TaskName -like '*DonTo
 python gui.py
 ```
 
+### 打包和发布
+```bash
+# 使用 PyInstaller 打包可执行文件
+pyinstaller DonTouchMe.spec --clean
+
+# 生成 Inno Setup 安装包（需要先安装 Inno Setup）
+build_installer.bat
+
+# 一键打包 + 生成安装包（推荐）
+build_all.bat
+```
+
 ### 数据库操作
 ```bash
 # 查看历史记录数据库
@@ -75,24 +87,36 @@ DonTouchMe/
 │   │   ├── screenshot.py  # 屏幕截图 (mss)
 │   │   ├── notifier.py    # 微信推送 (PushPlus API)
 │   │   ├── database.py    # 历史记录 (SQLite)
-│   │   └── monitor.py     # 中央协调器
+│   │   ├── monitor.py     # 中央协调器
+│   │   └── power_monitor.py # Windows 电源事件监听 (WM_POWERBROADCAST)
 │   ├── tasks/
 │   │   └── scheduler.py   # Windows Task Scheduler 集成
 │   ├── utils/             # 工具模块
 │   │   ├── config.py      # 配置管理 (JSON)
 │   │   ├── logger.py      # 日志系统（每日轮转）
-│   │   └── image_helper.py # 图像处理
+│   │   ├── image_helper.py # 图像处理
+│   │   ├── boot_detector.py # 开机检测（基于 psutil）
+│   │   └── autostart.py   # Windows 自启动管理
 │   ├── gui/               # PyQt5 GUI 组件
 │   │   ├── app.py         # 系统托盘应用
 │   │   ├── config_window.py
 │   │   ├── history_window.py
 │   │   └── task_manager_dialog.py
 │   └── main.py            # CLI 主入口
+├── scripts/               # 独立脚本
+│   ├── install_task.py    # 安装任务计划（独立脚本）
+│   └── uninstall_task.py  # 卸载任务计划
 ├── data/                  # 数据目录
 │   ├── config.json        # 配置文件
 │   ├── history.db         # SQLite 数据库
-│   └── *.jpg / *.png      # 捕获的图像和截图
-└── logs/                  # 日志文件（每日轮转）
+│   └── captures/          # 捕获的图像和截图
+│       ├── camera/        # 摄像头照片
+│       └── screen/        # 屏幕截图
+├── logs/                  # 日志文件（每日轮转）
+├── DonTouchMe.spec        # PyInstaller 打包配置
+├── installer.iss          # Inno Setup 安装包配置
+├── build_all.bat          # 一键打包 + 生成安装包
+└── gui.py                 # GUI 主入口
 ```
 
 ### 核心工作流程
@@ -123,11 +147,28 @@ DonTouchMe/
 ## 重要技术细节
 
 ### Windows 平台特性
+
+#### 任务计划集成
 - 使用 Windows Task Scheduler（`schtasks` 命令）实现自动触发
 - 任务名称：`DonTouchMe_Boot` 和 `DonTouchMe_Wake`
 - 需要管理员权限安装任务计划
 - 使用 `ctypes.windll.shell32.IsUserAnAdmin()` 检查权限
-- **唤醒检测机制**：监听 `Microsoft-Windows-Kernel-Power` Event ID 107（系统从睡眠/休眠恢复）
+
+#### 开机和唤醒检测
+项目实现了两种检测机制：
+
+1. **任务计划触发**（主要方法）：
+   - `DonTouchMe_Boot`：在系统启动时触发
+   - `DonTouchMe_Wake`：监听 `Microsoft-Windows-Kernel-Power` Event ID 107（系统从睡眠/休眠恢复）
+
+2. **程序内检测**（辅助机制）：
+   - `boot_detector.py`：通过 `psutil` 比较系统启动时间和程序启动时间，判断是否为开机启动
+   - `power_monitor.py`：监听 Windows `WM_POWERBROADCAST` 消息，实时检测电源事件（需要 pywin32）
+
+#### 打包和安装
+- **PyInstaller**：将 Python 程序打包为独立的 Windows 可执行文件（`DonTouchMe.spec`）
+- **Inno Setup**：创建专业的 Windows 安装程序（`installer.iss`），支持自动创建目录、注册表、快捷方式
+- **批处理文件编码**：所有 `.bat` 文件使用 UTF-8 with BOM 编码，确保中文正确显示
 
 ### UTF-8 编码处理
 项目支持中文，所有入口文件（`src/main.py`, `gui.py`）都包含 UTF-8 配置：
@@ -165,6 +206,13 @@ sys.stderr.reconfigure(encoding='utf-8')
 
 6. **GUI 线程安全**：GUI 使用独立线程执行监控任务，避免阻塞界面
 
+7. **打包注意事项**：
+   - 使用 `pyinstaller DonTouchMe.spec --clean` 打包时，确保 `data/config.json` 和 `src/` 目录被正确包含
+   - Inno Setup 编译前，确保已安装 Inno Setup 6.x 并添加到系统 PATH
+   - 打包后的可执行文件默认不显示控制台窗口（`console=False`）
+
+8. **工作目录处理**：批处理文件使用 `cd /d "%~dp0"` 切换到脚本所在目录，解决以管理员权限运行时的路径问题
+
 ## 技术栈
 
 - **Python**: 3.8+
@@ -173,6 +221,8 @@ sys.stderr.reconfigure(encoding='utf-8')
 - **HTTP**: requests
 - **数据库**: SQLite3 (内置)
 - **任务调度**: Windows Task Scheduler (通过 subprocess 调用 schtasks)
+- **Windows 集成**: pywin32 (电源事件监听), psutil (进程和系统信息)
+- **打包工具**: PyInstaller (可执行文件), Inno Setup (安装包)
 - **其他**: numpy (数值处理)
 
 ## 配置文件示例
@@ -212,5 +262,39 @@ sys.stderr.reconfigure(encoding='utf-8')
 
 - ✅ **阶段一**：核心功能（命令行版本）
 - ✅ **阶段二**：自动触发功能（Windows 任务计划）
-- ⏳ **阶段三**：数据持久化和历史管理
-- ⏳ **阶段四**：GUI 界面增强
+- ✅ **阶段三**：数据持久化和历史管理（SQLite 数据库）
+- ✅ **阶段四**：GUI 界面（PyQt5 系统托盘应用）
+- ✅ **阶段五**：打包和发布（PyInstaller + Inno Setup）
+
+## 发布流程
+
+完整的发布流程：
+
+1. **开发测试**：
+   ```bash
+   python src/main.py test  # 测试所有组件
+   ```
+
+2. **打包可执行文件**：
+   ```bash
+   pyinstaller DonTouchMe.spec --clean
+   # 输出：dist/DonTouchMe/DonTouchMe.exe
+   ```
+
+3. **生成安装包**：
+   ```bash
+   # 方式一：使用批处理（推荐）
+   build_all.bat
+
+   # 方式二：手动编译
+   build_installer.bat
+   # 或使用 Inno Setup Compiler 打开 installer.iss
+   ```
+
+4. **测试安装包**：
+   - 运行 `installer_output/DonTouchMe_Setup_v1.0.0.exe`
+   - 测试安装、运行、卸载流程
+
+5. **发布到 GitHub**：
+   - 创建 Release
+   - 上传安装包和可执行文件
