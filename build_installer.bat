@@ -9,21 +9,35 @@ echo.
 color 0A
 
 echo [步骤 1/4] 检查 Inno Setup 是否安装...
-set "ISCC_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-if not exist "%ISCC_PATH%" (
+
+:: 尝试多个可能的安装路径
+set "ISCC_PATH="
+set "ISCC_PATH_6=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+set "ISCC_PATH_5=C:\Program Files (x86)\Inno Setup 5\ISCC.exe"
+set "ISCC_PATH_6_64=C:\Program Files\Inno Setup 6\ISCC.exe"
+
+if exist "%ISCC_PATH_6%" (
+    set "ISCC_PATH=%ISCC_PATH_6%"
+) else if exist "%ISCC_PATH_6_64%" (
+    set "ISCC_PATH=%ISCC_PATH_6_64%"
+) else if exist "%ISCC_PATH_5%" (
+    set "ISCC_PATH=%ISCC_PATH_5%"
+)
+
+if "%ISCC_PATH%"=="" (
     echo.
     echo ❌ 错误: 未找到 Inno Setup!
     echo.
     echo 请按照以下步骤操作：
-    echo 1. 访问 https://jrsoftware.org/isdl.php
-    echo 2. 下载 Inno Setup 6.x
-    echo 3. 安装到默认路径
-    echo 4. 重新运行本脚本
+    echo 1. 阅读 Inno_Setup_安装指南.md
+    echo 2. 或运行 check_innosetup.bat 检测
+    echo 3. 访问 https://jrsoftware.org/isdl.php 下载安装
     echo.
     pause
     exit /b 1
 )
 echo ✅ Inno Setup 已安装
+echo    路径: %ISCC_PATH%
 echo.
 
 echo [步骤 2/4] 检查可执行文件...

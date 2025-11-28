@@ -46,7 +46,14 @@ DisableWelcomePage=no
 ; InfoBeforeFile=README.txt
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; 使用英文（默认，所有版本都支持）
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+; 如果需要中文界面，取消下面一行的注释
+; 注意：不同版本的 Inno Setup 中文语言文件名可能不同
+; Inno Setup 6.x: ChineseSimplified.isl
+; Inno Setup 5.x: ChineseSimp.isl
+; Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加图标:"; Flags: unchecked
