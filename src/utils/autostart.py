@@ -13,6 +13,30 @@ from .logger import Logger
 logger = Logger()
 
 
+def is_frozen() -> bool:
+    """检查是否为打包后的 exe 运行"""
+    return getattr(sys, 'frozen', False)
+
+
+def get_app_executable() -> str:
+    """
+    获取应用程序可执行文件路径
+
+    Returns:
+        打包后返回 exe 路径，开发环境返回 pythonw + gui.py
+    """
+    if is_frozen():
+        # 打包后的 exe
+        return sys.executable
+    else:
+        # 开发环境：使用 pythonw.exe 运行 gui.py
+        pythonw = sys.executable.replace('python.exe', 'pythonw.exe')
+        if not Path(pythonw).exists():
+            pythonw = sys.executable
+        gui_script = Path(__file__).parent.parent.parent / 'gui.py'
+        return f'"{pythonw}" "{gui_script}"'
+
+
 class AutoStartManager:
     """Windows 开机自启动管理器"""
 
@@ -59,30 +83,18 @@ class AutoStartManager:
         启用开机自启动
 
         Args:
-            gui_script_path: GUI 启动脚本路径，默认为项目的 gui.py
+            gui_script_path: GUI 启动脚本路径（已废弃，保留参数兼容性）
 
         Returns:
             操作是否成功
         """
         try:
-            # 确定 GUI 脚本路径
-            if gui_script_path is None:
-                # 默认为项目根目录的 gui.py
-                gui_script_path = str(Path(__file__).parent.parent.parent / 'gui.py')
+            # 获取启动命令（自动判断是 exe 还是开发环境）
+            command = get_app_executable()
 
-            # 检查文件是否存在
-            if not Path(gui_script_path).exists():
-                logger.error(f"GUI 脚本不存在: {gui_script_path}")
-                return False
-
-            # 使用 pythonw.exe 避免显示控制台窗口
-            pythonw = sys.executable.replace('python.exe', 'pythonw.exe')
-            if not Path(pythonw).exists():
-                logger.warning(f"pythonw.exe 不存在，使用 python.exe: {pythonw}")
-                pythonw = sys.executable
-
-            # 构建启动命令
-            command = f'"{pythonw}" "{gui_script_path}"'
+            # 如果是 exe，需要加引号
+            if is_frozen():
+                command = f'"{command}"'
 
             # 打开注册表键（写入）
             key = winreg.OpenKey(

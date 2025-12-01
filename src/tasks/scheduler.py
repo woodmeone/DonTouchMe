@@ -13,6 +13,11 @@ from ..utils.logger import Logger
 logger = Logger()
 
 
+def is_frozen() -> bool:
+    """检查是否为打包后的 exe 运行"""
+    return getattr(sys, 'frozen', False)
+
+
 class WindowsScheduler:
     """Windows 任务计划管理器"""
 
@@ -24,12 +29,21 @@ class WindowsScheduler:
         if sys.platform != 'win32':
             raise RuntimeError("此模块仅支持 Windows 系统")
 
-        # 获取 Python 解释器路径和主程序路径
-        self.python_exe = sys.executable
-        self.main_script = Path(__file__).parent.parent / 'main.py'
+        # 判断运行环境
+        self.is_frozen = is_frozen()
 
-        logger.info(f"Python 路径: {self.python_exe}")
-        logger.info(f"主程序路径: {self.main_script}")
+        if self.is_frozen:
+            # 打包后的 exe：直接使用 exe 文件
+            self.executable = sys.executable
+            self.use_script = False
+            logger.info(f"打包环境，可执行文件: {self.executable}")
+        else:
+            # 开发环境：使用 Python 解释器 + main.py
+            self.python_exe = sys.executable
+            self.main_script = Path(__file__).parent.parent / 'main.py'
+            self.use_script = True
+            logger.info(f"开发环境，Python: {self.python_exe}")
+            logger.info(f"主程序脚本: {self.main_script}")
 
     def _run_command(self, command: list) -> Tuple[bool, str]:
         """
@@ -89,6 +103,27 @@ class WindowsScheduler:
         success, output = self._run_command(command)
         return success
 
+    def _build_action_command(self, trigger_type: str, delay_seconds: int) -> str:
+        """
+        构建任务计划的执行命令
+
+        Args:
+            trigger_type: 触发类型 (boot/wake)
+            delay_seconds: 延迟秒数
+
+        Returns:
+            执行命令字符串
+        """
+        if self.is_frozen:
+            # 打包后：直接调用 exe
+            return f'"{self.executable}" trigger --type {trigger_type} --delay {delay_seconds}'
+        else:
+            # 开发环境：使用 pythonw.exe 避免弹出控制台
+            pythonw_exe = self.python_exe.replace('python.exe', 'pythonw.exe')
+            if not Path(pythonw_exe).exists():
+                pythonw_exe = self.python_exe
+            return f'"{pythonw_exe}" "{self.main_script}" trigger --type {trigger_type} --delay {delay_seconds}'
+
     def create_boot_task(self, delay_seconds: int = 10) -> bool:
         """
         创建开机触发任务
@@ -106,13 +141,8 @@ class WindowsScheduler:
             logger.warning(f"任务已存在: {self.TASK_NAME_BOOT}，将先删除")
             self.delete_task(self.TASK_NAME_BOOT)
 
-        # 构建命令
-        # 使用 pythonw.exe 避免弹出控制台窗口
-        pythonw_exe = self.python_exe.replace('python.exe', 'pythonw.exe')
-        if not Path(pythonw_exe).exists():
-            pythonw_exe = self.python_exe
-
-        action = f'"{pythonw_exe}" "{self.main_script}" trigger --type boot --delay {delay_seconds}'
+        # 构建执行命令
+        action = self._build_action_command('boot', delay_seconds)
 
         command = [
             'schtasks',
@@ -154,12 +184,18 @@ class WindowsScheduler:
             logger.warning(f"任务已存在: {self.TASK_NAME_WAKE}，将先删除")
             self.delete_task(self.TASK_NAME_WAKE)
 
-        # 使用 pythonw.exe
-        pythonw_exe = self.python_exe.replace('python.exe', 'pythonw.exe')
-        if not Path(pythonw_exe).exists():
-            pythonw_exe = self.python_exe
-
-        action = f'"{pythonw_exe}" "{self.main_script}" trigger --type wake --delay {delay_seconds}'
+        # 根据环境构建 XML 中的命令和参数
+        if self.is_frozen:
+            # 打包后：exe 作为命令，参数直接跟在后面
+            xml_command = self.executable
+            xml_arguments = f'trigger --type wake --delay {delay_seconds}'
+        else:
+            # 开发环境：pythonw 作为命令，脚本路径 + 参数
+            pythonw_exe = self.python_exe.replace('python.exe', 'pythonw.exe')
+            if not Path(pythonw_exe).exists():
+                pythonw_exe = self.python_exe
+            xml_command = pythonw_exe
+            xml_arguments = f'"{self.main_script}" trigger --type wake --delay {delay_seconds}'
 
         # 创建 XML 配置文件（用于事件触发）
         # 使用 Kernel-Power Event ID 107: 系统已从睡眠状态恢复
@@ -198,8 +234,8 @@ class WindowsScheduler:
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>{pythonw_exe}</Command>
-      <Arguments>"{self.main_script}" trigger --type wake --delay {delay_seconds}</Arguments>
+      <Command>{xml_command}</Command>
+      <Arguments>{xml_arguments}</Arguments>
     </Exec>
   </Actions>
 </Task>'''
